@@ -149,13 +149,16 @@ func PrintInit(env runtime.Environment, features Features, startTime *time.Time)
 		return fmt.Sprintf("echo \"Failed to write init script: %s\"", err.Error())
 	}
 
-	if env.Flags().Debug {
-		script := sourceInit(env, shell, scriptPath, async)
-		log.Debug("init script:", script)
-		return printDebug(env, startTime)
+	if !env.Flags().Debug {
+		return sourceInit(env, shell, scriptPath, async)
 	}
 
-	return sourceInit(env, shell, scriptPath, async)
+	sourceScript := sourceInit(env, shell, scriptPath, async)
+	if len(sourceScript) != 0 {
+		log.Debug("init source script:", script)
+	}
+
+	return printDebug(env, startTime)
 }
 
 func printDebug(env runtime.Environment, startTime *time.Time) string {
@@ -179,6 +182,7 @@ func sourceInit(env runtime.Environment, shell, scriptPath string, async bool) s
 		var err error
 		scriptPath, err = env.RunCommand("cygpath", "-u", scriptPath)
 		if err != nil {
+			log.Error(err)
 			return fmt.Sprintf("echo \"Failed to convert Cygwin path due to %s\"", err.Error())
 		}
 	}
@@ -189,17 +193,13 @@ func sourceInit(env runtime.Environment, shell, scriptPath string, async bool) s
 
 	switch shell {
 	case PWSH, PWSH5:
-		return scriptPath
-	case ZSH:
-		return fmt.Sprintf("source '%s'", scriptPath)
-	case BASH:
-		return fmt.Sprintf("source '%s'", scriptPath)
+		return fmt.Sprintf(`& "%s"`, scriptPath)
+	case ZSH, BASH, XONSH:
+		return fmt.Sprintf(`source '%s'`, scriptPath)
 	case FISH:
-		return fmt.Sprintf("source %s", scriptPath)
+		return fmt.Sprintf(`source "%s"`, scriptPath)
 	case ELVISH:
-		return fmt.Sprintf("eval (slurp < %s)", scriptPath)
-	case XONSH:
-		return fmt.Sprintf("source %s", scriptPath)
+		return fmt.Sprintf(`eval (slurp < '%s')`, scriptPath)
 	case CMD:
 		scriptPath = strings.ReplaceAll(scriptPath, `\`, `\\`)
 		return fmt.Sprintf(`load(io.open('%s', "r"):read("*a"))()`, scriptPath)
@@ -211,13 +211,13 @@ func sourceInit(env runtime.Environment, shell, scriptPath string, async bool) s
 func sourceInitAsync(shell, scriptPath string) string {
 	switch shell {
 	case PWSH, PWSH5:
-		return fmt.Sprintf(`function prompt() { %s }`, scriptPath)
+		return fmt.Sprintf(`function prompt() { & "%s" }`, scriptPath)
 	case ZSH:
 		return fmt.Sprintf(`precmd() { source '%s' }`, scriptPath)
 	case BASH:
 		return fmt.Sprintf(`PROMPT_COMMAND='source "%s"'`, scriptPath)
 	case FISH:
-		return fmt.Sprintf(`function fish_prompt; source %s; end`, scriptPath)
+		return fmt.Sprintf(`function fish_prompt; source "%s"; end`, scriptPath)
 	default:
 		return ""
 	}
